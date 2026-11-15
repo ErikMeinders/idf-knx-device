@@ -23,6 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The manifest's ">=6.0" would make the component manager refuse to
+      # resolve on 5.5 before any code is compiled. Drop it in this CI copy
+      # only, so the job reports whether the code itself builds.
+      - name: Relax IDF version constraint (experimental job only)
+        if: matrix.experimental == true
+        run: sed -i 's/version: ">=6.0"/version: ">=5.0"/' idf_component.yml
+
       - name: Build ip_device_demo (${{ matrix.idf }}, ${{ matrix.target }})
         uses: espressif/esp-idf-ci-action@v1
         with:
