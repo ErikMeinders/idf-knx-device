@@ -28,7 +28,9 @@ jobs:
       # only, so the job reports whether the code itself builds.
       - name: Relax IDF version constraint (experimental job only)
         if: matrix.experimental == true
-        run: sed -i 's/version: ">=6.0"/version: ">=5.0"/' idf_component.yml
+        run: |
+          sed -i 's/version: ">=6.0"/version: ">=5.0"/' idf_component.yml
+          grep -n '">=' idf_component.yml
 
       - name: Build ip_device_demo (${{ matrix.idf }}, ${{ matrix.target }})
         uses: espressif/esp-idf-ci-action@v1
