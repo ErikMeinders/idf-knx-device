@@ -1,0 +1,31 @@
+name: Build example
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        idf: [v6.0, v6.1]
+        target: [esp32, esp32s3, esp32c6]
+        include:
+          # Not in the manifest's supported range (>=6.0); built to learn
+          # whether 5.5 could be supported. Allowed to fail.
+          - idf: v5.5
+            target: esp32c6
+            experimental: true
+    continue-on-error: ${{ matrix.experimental == true }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ip_device_demo (${{ matrix.idf }}, ${{ matrix.target }})
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ matrix.idf }}
+          target: ${{ matrix.target }}
+          path: examples/ip_device_demo

@@ -1,0 +1,31 @@
+version: "0.1.0"
+description: ETS-programmable KNX IP device stack for ESP-IDF (native port of thelsing/knx, no Arduino layer).
+url: https://github.com/ErikMeinders/idf-knx-device
+repository: https://github.com/ErikMeinders/idf-knx-device.git
+documentation: https://github.com/ErikMeinders/idf-knx-device#readme
+issues: https://github.com/ErikMeinders/idf-knx-device/issues
+license: GPL-3.0-only
+maintainers:
+  - Erik Meinders <erik@easytocloud.com>
+tags:
+  - knx
+  - knx-ip
+  - ets
+  - home-automation
+  - building-automation
+# Only what the default exclusion list misses. It already drops build/,
+# managed_components/, sdkconfig, dependencies.lock, .github/, .vscode/ and
+# .DS_Store.
+files:
+  exclude:
+    - "CLAUDE.md"
+    - ".gitignore"
+    - "**/.clangd"
+    - "*.code-workspace"
+    - "**/.cache/**/*"
+    - "**/.claude/**/*"
+    - ".envrc"          # compote packs the working tree, not git
+    - "**/compile_commands.json"
+dependencies:
+  idf:
+    version: ">=6.0"

@@ -1,0 +1,33 @@
+menu "KNX device (idf-knx-device)"
+
+    choice KNX_MASK
+        prompt "KNX device profile (mask version)"
+        default KNX_MASK_57B0
+        help
+            The KNX system profile this device reports to ETS. It must match
+            the MaskVersion of the ETS product database (.knxprod) used to
+            commission the device.
+
+        config KNX_MASK_57B0
+            bool "0x57B0 - KNX IP device (routing over Wi-Fi/Ethernet)"
+    endchoice
+
+    config KNX_MASK_VERSION
+        hex
+        default 0x57B0 if KNX_MASK_57B0
+
+    config KNX_FLASH_SIZE
+        int "Configuration storage size (bytes)"
+        range 1024 65536
+        default 4096
+        help
+            Size of the buffer holding everything ETS downloads (address,
+            association and group object tables plus the application
+            parameters). It is persisted as a single NVS blob, so it must also
+            fit in the application's NVS partition.
+
+            Changing it on a commissioned device discards the stored
+            configuration (size mismatch), so the device has to be downloaded
+            from ETS again.
+
+endmenu

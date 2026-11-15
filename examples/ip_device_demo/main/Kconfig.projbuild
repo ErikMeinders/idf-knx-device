@@ -1,0 +1,34 @@
+menu "KNX IP device demo"
+
+    config DEMO_WIFI_SSID
+        string "Wi-Fi SSID"
+        default "myssid"
+
+    config DEMO_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default "mypassword"
+
+    config DEMO_PROG_BUTTON_GPIO
+        int "Programming button GPIO (-1 to disable)"
+        range -1 48
+        default 9 if IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32H2
+        default 0
+        help
+            Active-low push button that toggles KNX programming mode. The
+            default is the BOOT button on Espressif DevKits.
+
+    config DEMO_PROG_LED_GPIO
+        int "Programming LED GPIO (-1 to disable)"
+        range -1 48
+        default -1
+        help
+            Plain LED that is lit while the device is in programming mode.
+            Addressable (WS2812) LEDs need their own driver; use
+            setProgLedOnCallback()/setProgLedOffCallback() for those.
+
+    config DEMO_PROG_LED_ACTIVE_HIGH
+        bool "Programming LED is active high"
+        depends on DEMO_PROG_LED_GPIO >= 0
+        default y
+
+endmenu
