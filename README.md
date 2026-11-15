@@ -24,7 +24,7 @@ addresses from code, without ETS, a routing-only library is simpler.
 - Optional FreeRTOS runtime task (`knx_runtime`) that drives the stack and
   polls a debounced programming button.
 - Builds for ESP32, ESP32-S3 and ESP32-C6 on ESP-IDF 6.0 and 6.1. Runs on
-  real hardware in hw2knx, a sensor-to-KNX bridge (ESP32-C6, ESP-IDF 6.0).
+  real hardware in hw2knx, a sensor-to-KNX bridge (ESP32-C6, ESP-IDF 6.1).
 
 ## Installation
 

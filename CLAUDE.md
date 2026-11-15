@@ -19,8 +19,10 @@ It was split out of hw2knx (`../hw2knx`), which is still its main consumer.
 - `src/knx/`: upstream core. Keep it byte-identical to upstream except for the
   files listed under "Changes from upstream" in README.md. That keeps a future
   sync a plain diff against `980c047`.
-- `src/esp32_idf_platform.*`, `src/knx_facade.*`: upstream files carrying our
-  fixes. Each modified upstream file starts with a "Modified 2026 by ..."
+- `src/esp32_idf_platform.*`, `src/knx_facade.*`, `src/knx/bits.cpp`,
+  `src/knx/bau_systemB_device.*`: upstream files carrying our changes. The
+  last pair holds the read guard (no GroupValueRead answer before a value is
+  set) and the `GroupActivity` callback, both added in 0.2.0. Each modified upstream file starts with a "Modified 2026 by ..."
   notice, which GPLv3 §5(a) requires. Add one to any upstream file you change,
   and list the change in README.md and CHANGELOG.md.
 - `src/knx_runtime.*`: ours.
@@ -38,15 +40,28 @@ It was split out of hw2knx (`../hw2knx`), which is still its main consumer.
 
 ```bash
 cd examples/ip_device_demo
-source ~/.espressif/tools/activate_idf_v6.0.2.sh   # or the v6.1 script (esp32c6 only locally)
+source ~/.espressif/tools/activate_idf_v6.1.sh   # esp32c6 only locally; use v6.0.2 for esp32/esp32s3
 idf.py set-target esp32c6
 idf.py build
 ```
 
 CI ([build.yml](.github/workflows/build.yml)) builds the example for IDF
 v6.0 and v6.1 on esp32, esp32s3 and esp32c6, plus an allowed-to-fail v5.5
-job. The manifest declares `idf >= 6.0`. Widen it only after the 5.5 job is
-green.
+job. That job relaxes the manifest's `idf >= 6.0` in its CI copy, so it tests
+the code rather than the constraint. It has passed since 0.1.0, so the
+manifest could be widened to `>=5.5` in a future release.
+
+## Testing on hardware
+
+- hw2knx (`../hw2knx`) on an ESP32-C6 is the real-world test. Its
+  `knx_activity` log tag shows every `GroupActivity` event per group object.
+- Bus traffic can't be observed from the Mac: the home Wi-Fi AP doesn't
+  forward KNXnet/IP multicast between wireless clients. Use the Raspberry Pi
+  with knxd: `knxtool groupsocketlisten ip:localhost` and
+  `knxtool groupread ip:localhost <GA>`.
+- 0.2.0 was verified that way: a read is answered after boot, reads in the
+  first seconds after boot get no answer, and writes and cyclic resends
+  appear on the bus.
 
 ## Publishing
 
