@@ -1,4 +1,4 @@
-version: "0.1.0"
+version: "0.2.0"
 description: ETS-programmable KNX IP device stack for ESP-IDF (native port of thelsing/knx, no Arduino layer).
 url: https://github.com/ErikMeinders/idf-knx-device
 repository: https://github.com/ErikMeinders/idf-knx-device.git

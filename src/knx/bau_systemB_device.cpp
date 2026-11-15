@@ -1,3 +1,6 @@
+// Modified 2026 by Erik Meinders for idf-knx-device (https://github.com/ErikMeinders/idf-knx-device).
+// Based on thelsing/knx (GPLv3) at commit 980c047. See README.md, "Changes from upstream".
+
 #include "bau_systemB_device.h"
 #include "bits.h"
 #include <string.h>
@@ -190,6 +193,9 @@ void BauSystemBDevice::groupValueWriteLocalConfirm(AckType ack, uint16_t asap, P
         go.commFlag(Ok);
     else
         go.commFlag(Error);
+
+    if (status)
+        notifyGroupActivity(GroupActivity::WriteSent, asap);
 }
 
 void BauSystemBDevice::groupValueReadLocalConfirm(AckType ack, uint16_t asap, Priority priority, HopCountType hopType, const SecurityControl& secCtrl, bool status)
@@ -223,8 +229,30 @@ void BauSystemBDevice::groupValueReadIndication(uint16_t asap, Priority priority
     if (!go.communicationEnable() || !go.readEnable())
         return;
 
+    // idf-knx-device: a group object that has never been given a value would
+    // answer with its zero-filled buffer (e.g. 0.0 °C right after boot). Stay
+    // silent instead; the reader gets the real value once the application sets
+    // it and it is transmitted.
+    if (!go.initialized())
+    {
+        notifyGroupActivity(GroupActivity::ReadIgnored, asap);
+        return;
+    }
+
     uint8_t* data = go.valueRef();
     _appLayer.groupValueReadResponse(AckRequested, asap, priority, hopType, secCtrl, data, go.sizeInTelegram());
+    notifyGroupActivity(GroupActivity::ReadAnswered, asap);
+}
+
+void BauSystemBDevice::groupActivityCallback(GroupActivityCallback callback)
+{
+    _groupActivityCallback = callback;
+}
+
+void BauSystemBDevice::notifyGroupActivity(GroupActivity activity, uint16_t asap)
+{
+    if (_groupActivityCallback)
+        _groupActivityCallback(activity, asap);
 }
 
 void BauSystemBDevice::groupValueReadAppLayerConfirm(uint16_t asap, Priority priority, HopCountType hopType, const SecurityControl& secCtrl, uint8_t* data,
@@ -259,4 +287,5 @@ void BauSystemBDevice::groupValueWriteIndication(uint16_t asap, Priority priorit
         return;
 
     updateGroupObject(go, data, dataLength);
+    notifyGroupActivity(GroupActivity::WriteReceived, asap);
 }
