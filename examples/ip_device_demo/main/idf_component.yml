@@ -1,7 +1,7 @@
 ## IDF Component Manager Manifest File
 dependencies:
   erikmeinders/idf-knx-device:
-    version: "^0.1.0"
+    version: "^0.2.0"
     # Build this repository's source instead of a downloaded copy. Drop this
     # line to test the published package.
     override_path: "../../../"

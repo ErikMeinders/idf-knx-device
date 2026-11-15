@@ -1,3 +1,6 @@
+// Modified 2026 by Erik Meinders for idf-knx-device (https://github.com/ErikMeinders/idf-knx-device).
+// Based on thelsing/knx (GPLv3) at commit 980c047. See README.md, "Changes from upstream".
+
 #pragma once
 
 #include "config.h"
@@ -16,6 +19,17 @@
 #include "platform.h"
 #include "memory.h"
 
+// idf-knx-device: group communication events reported to the application, e.g.
+// to blink a status LED. `asap` is the group object number.
+enum class GroupActivity : uint8_t
+{
+    ReadAnswered,  // a GroupValueRead for one of our objects was answered
+    ReadIgnored,   // ... was not answered because the object has no value yet
+    WriteSent,     // a GroupValueWrite from one of our objects was transmitted
+    WriteReceived, // a GroupValueWrite updated one of our (write-enabled) objects
+};
+typedef void (*GroupActivityCallback)(GroupActivity activity, uint16_t asap);
+
 class BauSystemBDevice : public BauSystemB
 {
     public:
@@ -24,7 +38,14 @@ class BauSystemBDevice : public BauSystemB
         bool configured() override;
         GroupObjectTableObject& groupObjectTable();
 
+        // Called from loop(), i.e. in the task that drives the stack. Keep it
+        // short and do not call back into the stack from it.
+        void groupActivityCallback(GroupActivityCallback callback);
+
     protected:
+        void notifyGroupActivity(GroupActivity activity, uint16_t asap);
+        GroupActivityCallback _groupActivityCallback = nullptr;
+
         ApplicationLayer& applicationLayer() override;
 
         void groupValueWriteLocalConfirm(AckType ack, uint16_t asap, Priority priority, HopCountType hopType, const SecurityControl& secCtrl,

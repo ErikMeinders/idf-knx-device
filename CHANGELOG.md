@@ -6,6 +6,20 @@ All notable changes to this component are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Added
+
+- `BauSystemBDevice::groupActivityCallback()`: optional callback for group
+  communication events (read answered, read ignored, write sent, write
+  received), for example to blink a status LED.
+
+### Changed
+
+- A GroupValueRead for a group object that has never been given a value is no
+  longer answered. Before, the device replied with the zero-filled buffer, so
+  a reader asking right after boot got for example 0.0 °C.
+
 ## [0.1.0]
 
 ### Added

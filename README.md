@@ -29,14 +29,14 @@ addresses from code, without ETS, a routing-only library is simpler.
 ## Installation
 
 ```bash
-idf.py add-dependency "erikmeinders/idf-knx-device^0.1.0"
+idf.py add-dependency "erikmeinders/idf-knx-device^0.2.0"
 ```
 
 or in your `main/idf_component.yml`:
 
 ```yaml
 dependencies:
-  erikmeinders/idf-knx-device: "^0.1.0"
+  erikmeinders/idf-knx-device: "^0.2.0"
 ```
 
 Add `erikmeinders__idf-knx-device` to your component's `REQUIRES`.
@@ -91,6 +91,28 @@ Things to know:
 - **Programming LED:** use `knx.ledPin()` and `knx.ledPinActiveOn()` for a
   plain GPIO LED. For an addressable LED, use
   `setProgLedOnCallback()` / `setProgLedOffCallback()`.
+- **Unset objects are not readable.** Until a group object has been given a
+  value, a GroupValueRead for it gets no answer (not a zero). Readers receive
+  the value when the application first sets it and it is transmitted.
+
+### Group activity callback
+
+To react to bus traffic, for example to blink an LED, register a callback on
+the BAU:
+
+```cpp
+knxBau.groupActivityCallback([](GroupActivity activity, uint16_t asap) {
+    switch (activity) {
+    case GroupActivity::ReadAnswered:  /* someone read object `asap` */ break;
+    case GroupActivity::ReadIgnored:   /* ... before it had a value */  break;
+    case GroupActivity::WriteSent:     /* we transmitted `asap` */      break;
+    case GroupActivity::WriteReceived: /* the bus wrote to `asap` */    break;
+    }
+});
+```
+
+It runs in the task that calls `knx.loop()`. Keep it short, and don't call
+back into the stack from it.
 
 ### Configuration (`idf.py menuconfig` → KNX device)
 
@@ -153,6 +175,10 @@ affiliated with or certified by the KNX Association.
   - Set `SO_REUSEADDR` and `IP_MULTICAST_LOOP`.
 - `knx_facade.h`: check `_progLedOnCallback`, not `_progLedOffCallback`,
   before calling the "LED on" callback.
+- `knx/bau_systemB_device.{h,cpp}`:
+  - Don't answer a GroupValueRead for a group object that has never had a
+    value.
+  - Added the optional group activity callback.
 - `knx/bits.cpp`: buffer `print()`/`println()` fragments into whole lines and
   emit them through `esp_log` at DEBUG level, instead of `printf`.
 - Added `knx_runtime.{h,cpp}`, a FreeRTOS task helper with a polled,
