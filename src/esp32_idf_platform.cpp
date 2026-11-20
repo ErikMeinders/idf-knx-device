@@ -11,6 +11,10 @@
 #include "knx/bits.h"
 #include "nvs.h"
 #include <esp_timer.h>
+#include "esp_netif_net_stack.h"
+#include "lwip/igmp.h"
+#include "lwip/netif.h"
+#include "sdkconfig.h"
 
 static const char* KTAG = "KNX_LIB";
 
@@ -263,6 +267,7 @@ void Esp32IdfPlatform::setupMultiCast(uint32_t addr, uint16_t port)
     if (_netif && esp_netif_get_ip_info(_netif, &ip_info) == ESP_OK)
     {
         imreq.imr_interface.s_addr = ip_info.ip.addr;
+        _ownIp = ntohl(ip_info.ip.addr);
     }
     else
     {
@@ -278,6 +283,7 @@ void Esp32IdfPlatform::setupMultiCast(uint32_t addr, uint16_t port)
         return;
     }
 
+    _lastRefreshMs = millis();  // the join just sent a report
     ESP_LOGI(KTAG, "Successfully joined multicast group on port %d", port);
 }
 
@@ -301,18 +307,138 @@ bool Esp32IdfPlatform::sendBytesMultiCast(uint8_t* buffer, uint16_t len)
     dest_addr.sin_addr.s_addr = htonl(_multicast_addr);
 
     int sent_len = sendto(_sock, buffer, len, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-    if (sent_len < 0)
+    if (sent_len != len)
     {
-        ESP_LOGE(KTAG, "sendBytesMultiCast failed. Errno: %d", errno);
+        _sendFailures.fetch_add(1, std::memory_order_relaxed);
+        if (sent_len < 0)
+            ESP_LOGE(KTAG, "sendBytesMultiCast failed. Errno: %d", errno);
         return false;
     }
-    return sent_len == len;
+    return true;
+}
+
+bool Esp32IdfPlatform::multicastPending()
+{
+    if (_sock < 0)
+        return false;
+
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(_sock, &readable);
+    struct timeval noWait = { .tv_sec = 0, .tv_usec = 0 };
+    return select(_sock + 1, &readable, nullptr, nullptr, &noWait) > 0;
+}
+
+namespace
+{
+struct MembershipRenewal
+{
+    esp_netif_t* netif;
+    uint32_t group;  // network byte order
+};
+
+// Runs in the lwIP thread. Schedules an unsolicited IGMP membership report (sent within
+// 0.5 s) for every group the interface has joined, the KNX group included. No Leave is
+// sent: a snooping access point that sees a Leave may prune the group, deafening other
+// stations until they report again. Only if lwIP no longer knows the group is it joined
+// again (a join sends its own report).
+esp_err_t renewMembershipInTcpip(void* ctx)
+{
+    const auto* renewal = static_cast<const MembershipRenewal*>(ctx);
+    auto* nif = static_cast<struct netif*>(esp_netif_get_netif_impl(renewal->netif));
+    if (!nif)
+        return ESP_ERR_INVALID_STATE;
+    ip4_addr_t group;
+    group.addr = renewal->group;
+    if (!igmp_lookfor_group(nif, &group))
+        return igmp_joingroup_netif(nif, &group) == ERR_OK ? ESP_OK : ESP_FAIL;
+    igmp_report_groups(nif);
+    return ESP_OK;
+}
+} // namespace
+
+bool Esp32IdfPlatform::refreshMembership()
+{
+    if (_sock < 0 || !_netif)
+        return false;
+
+    _lastRefreshMs = millis();
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(_netif, &ip_info) == ESP_OK)
+        _ownIp = ntohl(ip_info.ip.addr);  // follows a DHCP change
+
+    MembershipRenewal renewal{ _netif, htonl(_multicast_addr) };
+    if (esp_netif_tcpip_exec(renewMembershipInTcpip, &renewal) != ESP_OK)
+    {
+        _renewalFailures.fetch_add(1, std::memory_order_relaxed);
+        ESP_LOGW(KTAG, "Renewing the multicast membership failed");
+        return false;
+    }
+    _renewals.fetch_add(1, std::memory_order_relaxed);
+    ESP_LOGD(KTAG, "Multicast membership renewed (IGMP report)");
+    return true;
+}
+
+void Esp32IdfPlatform::countReceived(uint32_t srcAddr)
+{
+    const uint32_t now = millis();
+    if (srcAddr == _ownIp.load(std::memory_order_relaxed))
+    {
+        _rxOwn.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    _rxOthers.fetch_add(1, std::memory_order_relaxed);
+    _lastOthersMs.store(now, std::memory_order_relaxed);
+    _heardOthers.store(true, std::memory_order_release);  // publishes _lastOthersMs
+
+    // Only this task writes the table, so claiming a free slot needs no compare-exchange.
+    for (SourceSlot& slot : _sources)
+    {
+        const uint32_t ip = slot.ip.load(std::memory_order_relaxed);
+        if (ip == 0)
+            slot.ip.store(srcAddr, std::memory_order_relaxed);
+        if (ip == 0 || ip == srcAddr)
+        {
+            slot.count.fetch_add(1, std::memory_order_relaxed);
+            slot.lastMs.store(now, std::memory_order_relaxed);
+            return;
+        }
+    }
+    _rxUntracked.fetch_add(1, std::memory_order_relaxed);
+}
+
+KnxLinkStats Esp32IdfPlatform::linkStats() const
+{
+    KnxLinkStats stats = {};
+    stats.rxOwn = _rxOwn.load(std::memory_order_relaxed);
+    stats.rxOthers = _rxOthers.load(std::memory_order_relaxed);
+    stats.rxUntracked = _rxUntracked.load(std::memory_order_relaxed);
+    stats.msSinceOthers = _heardOthers.load(std::memory_order_acquire)
+                              ? millis() - _lastOthersMs.load(std::memory_order_relaxed)
+                              : UINT32_MAX;
+    stats.renewals = _renewals.load(std::memory_order_relaxed);
+    stats.msSinceRenewal = millis() - _lastRefreshMs.load(std::memory_order_relaxed);
+    stats.renewalFailures = _renewalFailures.load(std::memory_order_relaxed);
+    stats.sendFailures = _sendFailures.load(std::memory_order_relaxed);
+    for (size_t i = 0; i < KnxLinkStats::kMaxSources; i++)
+    {
+        stats.sources[i].ip = _sources[i].ip.load(std::memory_order_relaxed);
+        stats.sources[i].count = _sources[i].count.load(std::memory_order_relaxed);
+        stats.sources[i].lastMs = _sources[i].lastMs.load(std::memory_order_relaxed);
+    }
+    return stats;
 }
 
 int Esp32IdfPlatform::readBytesMultiCast(uint8_t* buffer, uint16_t maxLen, uint32_t& src_addr, uint16_t& src_port)
 {
     if (_sock < 0)
         return 0;
+
+#if CONFIG_KNX_IGMP_REFRESH_S > 0
+    // The stack calls this every loop, so it doubles as the renewal timer.
+    if (millis() - _lastRefreshMs.load(std::memory_order_relaxed) >= CONFIG_KNX_IGMP_REFRESH_S * 1000U)
+        refreshMembership();
+#endif
 
     socklen_t socklen = sizeof(_remote_addr);
     int len = recvfrom(_sock, buffer, maxLen, 0, (struct sockaddr*)&_remote_addr, &socklen);
@@ -324,6 +450,7 @@ int Esp32IdfPlatform::readBytesMultiCast(uint8_t* buffer, uint16_t maxLen, uint3
 
     src_addr = ntohl(_remote_addr.sin_addr.s_addr);
     src_port = ntohs(_remote_addr.sin_port);
+    countReceived(src_addr);
 
     return len;
 }
@@ -356,6 +483,7 @@ bool Esp32IdfPlatform::sendBytesUniCast(uint32_t addr, uint16_t port, uint8_t* b
 
     if (sendto(_sock, buffer, len, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0)
     {
+        _sendFailures.fetch_add(1, std::memory_order_relaxed);
         ESP_LOGE(KTAG, "sendBytesUniCast failed. Errno: %d", errno);
         return false;
     }

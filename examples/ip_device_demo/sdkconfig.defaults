@@ -1,3 +1,7 @@
 # Wi-Fi + lwIP + the KNX stack do not fit the default 1 MB factory partition.
 CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# KNX/IP routing delivers every telegram of the installation to each device;
+# lwIP's default of 6 queued datagrams per socket drops bursts (see README).
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=16

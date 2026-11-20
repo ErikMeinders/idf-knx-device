@@ -30,4 +30,20 @@ menu "KNX device (idf-knx-device)"
             configuration (size mismatch), so the device has to be downloaded
             from ETS again.
 
+    config KNX_IGMP_REFRESH_S
+        int "Renew the multicast membership every (seconds, 0 = never)"
+        range 0 3600
+        default 20
+        help
+            How often the platform sends a fresh IGMP report for the KNX
+            multicast group, while the socket stays open.
+
+            Without an IGMP querier on the network, Wi-Fi access points and
+            mesh systems (seen on a TP-Link Deco) stop forwarding multicast to
+            a station at random moments, for up to minutes. A report makes them
+            resume within seconds, so the interval caps how long the device
+            can be deaf. Each renewal sends one small IGMP report per multicast
+            group the interface has joined (the KNX group, plus mDNS and any
+            others), and no IGMP Leave.
+
 endmenu

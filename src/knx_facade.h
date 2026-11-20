@@ -241,7 +241,18 @@ template <class P, class B> class KnxFacade : private SaveRestore
             }
 
             _bau.loop();
+
+            // The data link layer reads one datagram per loop. Hand it the rest of a
+            // burst now, before lwIP's small per-socket queue overflows. Only the data
+            // link layer runs again: replies (sendNextGroupTelegram) keep their pace,
+            // and every datagram still goes through readBytesMultiCast().
+            for (int i = 0; i < kMaxExtraDatagramsPerLoop && platform().multicastPending(); i++)
+                _bau.getDataLinkLayer()->loop();
         }
+
+        // Bounds one loop() call so the caller's own work still runs during a long burst;
+        // whatever is left is drained on the next call.
+        static constexpr int kMaxExtraDatagramsPerLoop = 32;
 
         void manufacturerId(uint16_t value)
         {

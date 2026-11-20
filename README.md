@@ -29,14 +29,14 @@ addresses from code, without ETS, a routing-only library is simpler.
 ## Installation
 
 ```bash
-idf.py add-dependency "erikmeinders/idf-knx-device^0.2.0"
+idf.py add-dependency "erikmeinders/idf-knx-device^0.3.0"
 ```
 
 or in your `main/idf_component.yml`:
 
 ```yaml
 dependencies:
-  erikmeinders/idf-knx-device: "^0.2.0"
+  erikmeinders/idf-knx-device: "^0.3.0"
 ```
 
 Add `erikmeinders__idf-knx-device` to your component's `REQUIRES`.
@@ -87,7 +87,36 @@ Things to know:
 - **Check `knx.configured()` before touching group objects.** Before the
   first ETS download they have no backing storage.
 - **Touch group objects from one task only.** The stack is not thread-safe.
-  Put application logic in `loopFn`, or hand values to it through a queue.
+  Put application logic in `loopFn`, or run it there from another task with
+  `knx_runtime_post([] { ... })`. Inside `loopFn` or a posted function, post
+  only with a zero wait: that code runs in the runtime task, which can't empty
+  its own queue while it waits.
+- **Raise lwIP's UDP receive queue.** KNX/IP routing delivers the whole
+  installation's traffic to every device, and lwIP keeps only
+  `CONFIG_LWIP_UDP_RECVMBOX_SIZE` datagrams per socket (default 6), dropping
+  the rest silently. Put `CONFIG_LWIP_UDP_RECVMBOX_SIZE=16` in your
+  `sdkconfig.defaults`. `knx.loop()` drains everything that is waiting, but a
+  burst that arrives faster than the task gets scheduled still needs the
+  queue. Measured on an ESP32-C6 with 30-telegram bursts: with the default
+  queue, 1 ms spacing lost 9% and back-to-back bursts lost 77%; with 16, 1 ms
+  spacing lost nothing and back-to-back bursts lost 29%.
+- **Wi-Fi stops delivering multicast now and then.** On networks without an
+  IGMP querier (most homes), access points and mesh systems stop forwarding
+  multicast to a station at random moments, for tens of seconds up to
+  minutes, while other stations keep receiving. A fresh IGMP report ends it
+  within a second, so the platform sends one every
+  `CONFIG_KNX_IGMP_REFRESH_S` seconds (default 20) without closing the
+  socket. lwIP sends the report for every multicast group the interface has
+  joined (mDNS included), one packet per group. If your application expects a telegram regularly, call
+  `knxPlatform.refreshMembership()` when it stays away. Don't renew by
+  leaving and rejoining the group yourself: the IGMP Leave can make the
+  access point drop the group for other devices too.
+- **Watch reception** with `knxPlatform.linkStats()`, safe from any task:
+  datagrams per sender, your own telegrams heard back, time since the last
+  datagram from another device, renewals and failed sends. Showing it in a
+  status page makes lost telegrams visible.
+- **Pin the runtime task** with `runtime.coreId` when another core must stay
+  free, for example for timing-critical I/O.
 - **Programming LED:** use `knx.ledPin()` and `knx.ledPinActiveOn()` for a
   plain GPIO LED. For an addressable LED, use
   `setProgLedOnCallback()` / `setProgLedOffCallback()`.
@@ -120,6 +149,7 @@ back into the stack from it.
 |---|---|---|
 | `KNX_MASK` | `0x57B0` | Device profile reported to ETS. It must match the `MaskVersion` of your ETS product. |
 | `KNX_FLASH_SIZE` | 4096 | Bytes reserved for the ETS configuration. Stored as one NVS blob. |
+| `KNX_IGMP_REFRESH_S` | 20 | Seconds between multicast membership renewals (IGMP reports); 0 turns them off. |
 
 ### ETS product database
 
@@ -166,15 +196,24 @@ affiliated with or certified by the KNX Association.
 
 - Removed the Arduino, ESP8266, SAMD, RP2040, STM32, LibreTiny, Linux and
   CC1310 platforms. Only `esp32_idf_platform` remains.
-- `esp32_idf_platform.cpp`:
+- `esp32_idf_platform.{h,cpp}`:
   - Convert IP address, netmask and gateway from network to host byte order
     (`ntohl`). Without this, the multicast join and the IP addresses reported
     to ETS were wrong.
   - Give the multicast socket a 20 ms receive timeout so `loop()` no longer
     blocks while waiting for a telegram.
   - Set `SO_REUSEADDR` and `IP_MULTICAST_LOOP`.
-- `knx_facade.h`: check `_progLedOnCallback`, not `_progLedOffCallback`,
-  before calling the "LED on" callback.
+  - Added `multicastPending()`, a non-blocking check for a waiting datagram,
+    used by the drain in `knx_facade.h` below.
+  - Periodic and on-demand multicast membership renewal
+    (`refreshMembership()`), and reception counters (`linkStats()`), including
+    failed sends, which upstream only logs.
+- `knx_facade.h`:
+  - Check `_progLedOnCallback`, not `_progLedOffCallback`, before calling the
+    "LED on" callback.
+  - After the normal loop, `loop()` runs the data link layer again for every
+    datagram still waiting (up to 32), so a burst is handled before lwIP's
+    small per-socket queue overflows. Upstream reads one datagram per loop.
 - `knx/bau_systemB_device.{h,cpp}`:
   - Don't answer a GroupValueRead for a group object that has never had a
     value.
@@ -182,6 +221,7 @@ affiliated with or certified by the KNX Association.
 - `knx/bits.cpp`: buffer `print()`/`println()` fragments into whole lines and
   emit them through `esp_log` at DEBUG level, instead of `printf`.
 - Added `knx_runtime.{h,cpp}`, a FreeRTOS task helper with a polled,
-  debounced programming button.
+  debounced programming button, optional core pinning, and
+  `knx_runtime_post()` to run work in the KNX task.
 - Build: Kconfig options replace the global `MASK_VERSION`/`KNX_FLASH_SIZE`
   defines, and only `src/` is a public include directory.
